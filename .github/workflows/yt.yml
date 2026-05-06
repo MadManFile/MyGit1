@@ -1,0 +1,38 @@
+name: 🚀 Automatic YouTube Uploader
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:   # این یعنی میتونی از تب Actions دستی هم روش کنی
+
+jobs:
+  upload-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📥 1. Getting the codes
+        uses: actions/checkout@v4
+
+      - name: 🐍 2. Setting up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📦 3. Installing Requirements
+        run: |
+          pip install --upgrade pip
+          pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib requests
+
+      - name: 🎬 4. Installing FFmpeg (for Thumbnail)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: 🔑 5. Setting up Google Secrets
+        env:
+          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS }}
+        run: echo "$GOOGLE_CREDENTIALS_JSON" > credentials.json
+
+      - name: 🚀 6. Running the Main Script
+        env:
+          VIDEO_URL: ${{ secrets.VIDEO_URL }}
+          VIDEO_TITLE: ${{ secrets.VIDEO_TITLE }}
+          VIDEO_DESC: ${{ secrets.VIDEO_DESC }}
+        run: python scripts/upload_video.py
