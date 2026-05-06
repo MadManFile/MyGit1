@@ -1,38 +1,74 @@
-name: 🚀 Automatic YouTube Uploader
+name: 📥 YouTube Downloader - Three Methods
 
 on:
-  push:
-    branches: [ "main" ]
-  workflow_dispatch:   # این یعنی میتونی از تب Actions دستی هم روش کنی
+  workflow_dispatch:  # فقط دستی اجرا بشه
+    inputs:
+      url:
+        description: '🔗 YouTube URL (لینک ویدیو)'
+        required: true
+        type: string
+      method:
+        description: '📦 روش دانلود'
+        required: true
+        default: 'yt-dlp'
+        type: choice
+        options:
+          - yt-dlp
+          - pytube
+          - both
+      quality:
+        description: '🎯 کیفیت'
+        required: true
+        default: 'best'
+        type: choice
+        options:
+          - best
+          - 1080
+          - 720
+          - audio
 
 jobs:
-  upload-job:
+  download:
     runs-on: ubuntu-latest
+    
     steps:
-      - name: 📥 1. Getting the codes
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
-
-      - name: 🐍 2. Setting up Python
+      
+      - name: 🐍 Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: 📦 3. Installing Requirements
+      
+      - name: 📦 Install dependencies
         run: |
           pip install --upgrade pip
-          pip install google-api-python-client google-auth-httplib2 google-auth-oauthlib requests
-
-      - name: 🎬 4. Installing FFmpeg (for Thumbnail)
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: 🔑 5. Setting up Google Secrets
-        env:
-          GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS }}
-        run: echo "$GOOGLE_CREDENTIALS_JSON" > credentials.json
-
-      - name: 🚀 6. Running the Main Script
-        env:
-          VIDEO_URL: ${{ secrets.VIDEO_URL }}
-          VIDEO_TITLE: ${{ secrets.VIDEO_TITLE }}
-          VIDEO_DESC: ${{ secrets.VIDEO_DESC }}
-        run: python scripts/upload_video.py
+          pip install -r requirements.txt
+          # برای yt-dlp نیاز به ffmpeg داریم
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      
+      - name: 🎬 Download with yt-dlp
+        if: ${{ github.event.inputs.method == 'yt-dlp' || github.event.inputs.method == 'both' }}
+        run: |
+          python downloaders/yt_dlp_downloader.py << EOF
+          ${{ github.event.inputs.url }}
+          ${{ github.event.inputs.quality == 'best' && '1' || github.event.inputs.quality == '1080' && '2' || github.event.inputs.quality == '720' && '3' || '4' }}
+          EOF
+      
+      - name: 🐍 Download with pytube
+        if: ${{ github.event.inputs.method == 'pytube' || github.event.inputs.method == 'both' }}
+        run: |
+          python downloaders/pytube_downloader.py << EOF
+          ${{ github.event.inputs.url }}
+          ${{ github.event.inputs.quality == 'best' && '1' || github.event.inputs.quality == 'audio' && '3' || '2' }}
+          EOF
+      
+      - name: 📤 Upload downloaded files
+        uses: actions/upload-artifact@v4
+        with:
+          name: downloaded-videos-${{ github.run_id }}
+          path: |
+            downloads_*/
+            *.mp4
+            *.mp3
