@@ -1,0 +1,88 @@
+name: 🔍 Step 1 - Show Available Formats
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: '🔗 لینک یوتیوب'
+        required: true
+        type: string
+
+jobs:
+  show-formats:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 📦 Install yt-dlp
+        run: |
+          pip install yt-dlp
+          yt-dlp --version
+      
+      - name: 🔍 Get video information
+        run: |
+          yt-dlp -J "${{ github.event.inputs.url }}" > video_info.json
+          
+          # استخراج عنوان ویدیو
+          TITLE=$(jq -r '.title' video_info.json)
+          DURATION=$(jq -r '.duration' video_info.json)
+          CHANNEL=$(jq -r '.channel' video_info.json)
+          
+          echo "## 📺 اطلاعات ویدیو" > report.md
+          echo "" >> report.md
+          echo "| آیتم | مقدار |" >> report.md
+          echo "|------|-------|" >> report.md
+          echo "| عنوان | $TITLE |" >> report.md
+          echo "| کانال | $CHANNEL |" >> report.md
+          echo "| مدت زمان | $DURATION ثانیه |" >> report.md
+          echo "" >> report.md
+      
+      - name: 📊 Get all available formats
+        run: |
+          echo "## 🎯 کیفیت‌های موجود" >> report.md
+          echo "" >> report.md
+          echo '```' >> report.md
+          yt-dlp -F "${{ github.event.inputs.url }}" >> report.md
+          echo '```' >> report.md
+          echo "" >> report.md
+          
+          # استخراج کیفیت‌های مفید
+          echo "## 💡 کدهای پیشنهادی" >> report.md
+          echo "" >> report.md
+          echo "| توضیح | کد کیفیت |" >> report.md
+          echo "|-------|-----------|" >> report.md
+          
+          # بهترین کیفیت
+          echo "| بهترین کیفیت موجود | best |" >> report.md
+          
+          # کیفیت 720p
+          if yt-dlp -F "${{ github.event.inputs.url }}" | grep -q "1280x720"; then
+            echo "| کیفیت 720p (پیشنهادی برای گیت‌هاب) | bestvideo[height<=720]+bestaudio/best |" >> report.md
+          fi
+          
+          # کیفیت 1080p (اگر موجود باشد)
+          if yt-dlp -F "${{ github.event.inputs.url }}" | grep -q "1920x1080"; then
+            echo "| کیفیت 1080p (فعال با تایید دستی) | bestvideo[height<=1080]+bestaudio/best |" >> report.md
+          fi
+          
+          # حداقل کیفیت
+          echo "| حداقل کیفیت (برای حجم کم) | worstvideo+worstaudio/worst |" >> report.md
+          
+          # فقط صوت
+          echo "| فقط صوت (MP3) | bestaudio/best |" >> report.md
+          
+          # نمایش حجم تقریبی
+          echo "" >> report.md
+          echo "## ⚠️ نکات مهم" >> report.md
+          echo "- محدودیت آپلود گیت‌هاب: **حداکثر ۲ گیگابایت**" >> report.md
+          echo "- کیفیت 720p معمولاً زیر ۲GB است" >> report.md
+          echo "- برای کیفیت‌های بالاتر از 720p، حتماً حجم را بررسی کنید" >> report.md
+      
+      - name: 📤 Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: formats-report-${{ github.run_id }}
+          path: report.md
+          retention-days: 7
+      
+      - name: 📝 Show summary
+        run: |
+          cat report.md >> $GITHUB_STEP_SUMMARY
