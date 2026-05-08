@@ -27,9 +27,24 @@ jobs:
     steps:
       - name: 📦 Install yt-dlp & ffmpeg
         run: |
-          pip install yt-dlp
+          pip install --upgrade yt-dlp
           sudo apt-get update
           sudo apt-get install -y ffmpeg
+          yt-dlp --version
+      
+      - name: 🔍 Test if video is accessible
+        run: |
+          URL="${{ github.event.inputs.url }}"
+          echo "🔍 تست دسترسی به ویدیو..."
+          
+          # فقط اطلاعات پایه را بدون دانلود بگیر
+          yt-dlp --simulate --print "%(title)s - %(channel)s" "$URL"
+          
+          if [ $? -ne 0 ]; then
+            echo "❌ خطا: ویدیو قابل دسترس نیست!"
+            echo "ممکن است نیاز به لاگین داشته باشد یا محدودیت سنی داشته باشد."
+            exit 1
+          fi
       
       - name: 🎬 Download video
         run: |
@@ -38,8 +53,7 @@ jobs:
           QUALITY="${{ github.event.inputs.quality }}"
           URL="${{ github.event.inputs.url }}"
           
-          # تنظیم فرمت بر اساس کیفیت انتخابی
-          # اگر کیفیت مورد نظر نبود، خود yt-dlp نزدیک‌ترین کیفیت موجود را می‌گیرد
+          # تنظیم فرمت
           case "$QUALITY" in
             "144")
               FORMAT="bestvideo[height<=144]+bestaudio/best"
@@ -68,18 +82,27 @@ jobs:
           echo "🔧 فرمت جستجو: $FORMAT"
           echo "⬇️ در حال دانلود..."
           
-          # دانلود برای صوت
+          # گزینه‌های پایه برای پایداری بیشتر
+          OPTS="--no-check-certificate --no-warnings --progress"
+          
           if [ "$QUALITY" = "audio-only" ]; then
-            yt-dlp -f "$FORMAT" \
+            yt-dlp $OPTS -f "$FORMAT" \
               -x --audio-format mp3 \
               -o "download/%(title)s.%(ext)s" \
-              "$URL"
+              "$URL" 2>&1 | tee download.log
           else
-            # دانلود ویدیو - اگر کیفیت مورد نظر نبود خودکار بالاترین موجود را می‌گیرد
-            yt-dlp -f "$FORMAT" \
+            yt-dlp $OPTS -f "$FORMAT" \
               --merge-output-format mp4 \
               -o "download/%(title)s.%(ext)s" \
-              "$URL"
+              "$URL" 2>&1 | tee download.log
+          fi
+          
+          # بررسی موفقیت
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "❌ خطا در دانلود!"
+            echo "--- آخرین خطاهای yt-dlp: ---"
+            tail -20 download.log
+            exit 1
           fi
           
           echo "✅ دانلود کامل شد!"
