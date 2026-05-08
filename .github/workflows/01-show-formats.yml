@@ -17,64 +17,116 @@ jobs:
           pip install yt-dlp
           yt-dlp --version
       
-      - name: 🔍 Get video information
+      - name: 🔍 Get video information (safe mode)
         run: |
-          yt-dlp -J "${{ github.event.inputs.url }}" > video_info.json
+          URL="${{ github.event.inputs.url }}"
           
-          # استخراج عنوان ویدیو
-          TITLE=$(jq -r '.title' video_info.json)
-          DURATION=$(jq -r '.duration' video_info.json)
-          CHANNEL=$(jq -r '.channel' video_info.json)
-          
-          echo "## 📺 اطلاعات ویدیو" > report.md
+          echo "# 📺 گزارش ویدیو" > report.md
           echo "" >> report.md
-          echo "| آیتم | مقدار |" >> report.md
-          echo "|------|-------|" >> report.md
-          echo "| عنوان | $TITLE |" >> report.md
-          echo "| کانال | $CHANNEL |" >> report.md
-          echo "| مدت زمان | $DURATION ثانیه |" >> report.md
+          echo "**لینک:** $URL" >> report.md
+          echo "" >> report.md
+          
+          # دریافت اطلاعات اولیه با مدیریت خطا
+          echo "## 📊 اطلاعات ویدیو" >> report.md
+          echo "" >> report.md
+          echo '```' >> report.md
+          
+          # استفاده از --print برای اطلاعات پایه (مطمئن‌تر از -J)
+          echo "عنوان:" >> report.md
+          yt-dlp --print "%(title)s" "$URL" 2>/dev/null || echo "نامشخص" >> report.md
+          echo "" >> report.md
+          
+          echo "کانال:" >> report.md
+          yt-dlp --print "%(channel)s" "$URL" 2>/dev/null || echo "نامشخص" >> report.md
+          echo "" >> report.md
+          
+          echo "مدت زمان (ثانیه):" >> report.md
+          yt-dlp --print "%(duration)s" "$URL" 2>/dev/null || echo "نامشخص" >> report.md
+          echo "" >> report.md
+          
+          echo '```' >> report.md
           echo "" >> report.md
       
       - name: 📊 Get all available formats
         run: |
+          URL="${{ github.event.inputs.url }}"
+          
           echo "## 🎯 کیفیت‌های موجود" >> report.md
           echo "" >> report.md
           echo '```' >> report.md
-          yt-dlp -F "${{ github.event.inputs.url }}" >> report.md
+          
+          # دریافت لیست فرمت‌ها با مدیریت خطا
+          yt-dlp -F "$URL" >> report.md 2>&1
+          
           echo '```' >> report.md
           echo "" >> report.md
           
-          # استخراج کیفیت‌های مفید
-          echo "## 💡 کدهای پیشنهادی" >> report.md
+          # استخراج خلاصه کیفیت‌ها
+          echo "## 📈 خلاصه کیفیت‌های موجود" >> report.md
           echo "" >> report.md
-          echo "| توضیح | کد کیفیت |" >> report.md
-          echo "|-------|-----------|" >> report.md
+          echo "| نوع | کیفیت | کد پیشنهادی |" >> report.md
+          echo "|-----|--------|--------------|" >> report.md
           
-          # بهترین کیفیت
-          echo "| بهترین کیفیت موجود | best |" >> report.md
-          
-          # کیفیت 720p
-          if yt-dlp -F "${{ github.event.inputs.url }}" | grep -q "1280x720"; then
-            echo "| کیفیت 720p (پیشنهادی برای گیت‌هاب) | bestvideo[height<=720]+bestaudio/best |" >> report.md
+          # بررسی کیفیت‌های مختلف
+          if yt-dlp -F "$URL" 2>/dev/null | grep -q "1920x1080"; then
+            echo "| ویدیو | 1080p (Full HD) | \`bestvideo[height<=1080]+bestaudio/best\` |" >> report.md
           fi
           
-          # کیفیت 1080p (اگر موجود باشد)
-          if yt-dlp -F "${{ github.event.inputs.url }}" | grep -q "1920x1080"; then
-            echo "| کیفیت 1080p (فعال با تایید دستی) | bestvideo[height<=1080]+bestaudio/best |" >> report.md
+          if yt-dlp -F "$URL" 2>/dev/null | grep -q "1280x720"; then
+            echo "| ویدیو | 720p (HD) | \`bestvideo[height<=720]+bestaudio/best\` |" >> report.md
+          fi
+          
+          if yt-dlp -F "$URL" 2>/dev/null | grep -q "854x480"; then
+            echo "| ویدیو | 480p | \`bestvideo[height<=480]+bestaudio/best\` |" >> report.md
+          fi
+          
+          if yt-dlp -F "$URL" 2>/dev/null | grep -q "640x360"; then
+            echo "| ویدیو | 360p | \`bestvideo[height<=360]+bestaudio/best\` |" >> report.md
           fi
           
           # حداقل کیفیت
-          echo "| حداقل کیفیت (برای حجم کم) | worstvideo+worstaudio/worst |" >> report.md
+          echo "| ویدیو | حداقل کیفیت | \`worstvideo+worstaudio/worst\` |" >> report.md
           
           # فقط صوت
-          echo "| فقط صوت (MP3) | bestaudio/best |" >> report.md
+          echo "| صوت | فقط MP3 | \`bestaudio/best\` |" >> report.md
           
-          # نمایش حجم تقریبی
+          # بهترین کیفیت
+          echo "| ویدیو | بهترین کیفیت موجود | \`best\` |" >> report.md
+          
           echo "" >> report.md
-          echo "## ⚠️ نکات مهم" >> report.md
-          echo "- محدودیت آپلود گیت‌هاب: **حداکثر ۲ گیگابایت**" >> report.md
-          echo "- کیفیت 720p معمولاً زیر ۲GB است" >> report.md
-          echo "- برای کیفیت‌های بالاتر از 720p، حتماً حجم را بررسی کنید" >> report.md
+      
+      - name: 💡 Generate recommendations
+        run: |
+          URL="${{ github.event.inputs.url }}"
+          
+          echo "## 💡 توصیه‌ها" >> report.md
+          echo "" >> report.md
+          
+          # بررسی حجم تقریبی برای کیفیت 720p
+          echo "### 📊 تخمین حجم (تقریبی)" >> report.md
+          echo "" >> report.md
+          echo "| کیفیت | حجم تقریبی | مناسب برای گیت‌هاب |" >> report.md
+          echo "|--------|------------|-------------------|" >> report.md
+          echo "| 720p | 300-800 MB | ✅ بله |" >> report.md
+          echo "| 1080p | 1-2 GB | ⚠️ مرزی (بررسی شود) |" >> report.md
+          echo "| بالاتر | 2+ GB | ❌ خیر (باید تکه‌تکه شود) |" >> report.md
+          echo "" >> report.md
+          
+          echo "### 🎯 پیشنهاد نهایی" >> report.md
+          echo "" >> report.md
+          echo "برای دانلود در گیت‌هاب، پیشنهاد می‌شود از کیفیت **720p** استفاده کنید." >> report.md
+          echo "" >> report.md
+          
+          echo "## 📋 نحوه استفاده در مرحله دوم" >> report.md
+          echo "" >> report.md
+          echo "1. کد کیفیت مورد نظر را از جدول بالا انتخاب کنید" >> report.md
+          echo "2. به مرحله دوم (**Step 2 - Smart Download**) بروید" >> report.md
+          echo "3. لینک یکسان را وارد کنید" >> report.md
+          echo "4. حالت کیفیت مناسب را انتخاب کنید" >> report.md
+          echo "" >> report.md
+          
+          echo "---" >> report.md
+          echo "*گزارش به صورت خودکار توسط yt-dlp تولید شده است*" >> report.md
       
       - name: 📤 Upload report
         uses: actions/upload-artifact@v4
@@ -86,3 +138,6 @@ jobs:
       - name: 📝 Show summary
         run: |
           cat report.md >> $GITHUB_STEP_SUMMARY
+          echo ""
+          echo "✅ گزارش با موفقیت تولید شد!"
+          echo "📁 فایل report.md را از بخش Artifacts دانلود کنید"
