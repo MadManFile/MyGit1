@@ -1,0 +1,94 @@
+name: 📥 YouTube Downloader
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: '🔗 لینک یوتیوب'
+        required: true
+        type: string
+      quality:
+        description: '🎯 کیفیت مورد نظر'
+        required: true
+        default: '720'
+        type: choice
+        options:
+          - '144'
+          - '240'
+          - '360'
+          - '480'
+          - '720'
+          - audio-only
+
+jobs:
+  download:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📦 Install yt-dlp & ffmpeg
+        run: |
+          pip install yt-dlp
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+      
+      - name: 🎬 Download video
+        run: |
+          mkdir -p download
+          
+          QUALITY="${{ github.event.inputs.quality }}"
+          URL="${{ github.event.inputs.url }}"
+          
+          # تنظیم فرمت بر اساس کیفیت انتخابی
+          # اگر کیفیت مورد نظر نبود، خود yt-dlp نزدیک‌ترین کیفیت موجود را می‌گیرد
+          case "$QUALITY" in
+            "144")
+              FORMAT="bestvideo[height<=144]+bestaudio/best"
+              ;;
+            "240")
+              FORMAT="bestvideo[height<=240]+bestaudio/best"
+              ;;
+            "360")
+              FORMAT="bestvideo[height<=360]+bestaudio/best"
+              ;;
+            "480")
+              FORMAT="bestvideo[height<=480]+bestaudio/best"
+              ;;
+            "720")
+              FORMAT="bestvideo[height<=720]+bestaudio/best"
+              ;;
+            "audio-only")
+              FORMAT="bestaudio/best"
+              ;;
+            *)
+              FORMAT="bestvideo[height<=720]+bestaudio/best"
+              ;;
+          esac
+          
+          echo "🎯 کیفیت درخواستی: $QUALITY"
+          echo "🔧 فرمت جستجو: $FORMAT"
+          echo "⬇️ در حال دانلود..."
+          
+          # دانلود برای صوت
+          if [ "$QUALITY" = "audio-only" ]; then
+            yt-dlp -f "$FORMAT" \
+              -x --audio-format mp3 \
+              -o "download/%(title)s.%(ext)s" \
+              "$URL"
+          else
+            # دانلود ویدیو - اگر کیفیت مورد نظر نبود خودکار بالاترین موجود را می‌گیرد
+            yt-dlp -f "$FORMAT" \
+              --merge-output-format mp4 \
+              -o "download/%(title)s.%(ext)s" \
+              "$URL"
+          fi
+          
+          echo "✅ دانلود کامل شد!"
+          echo "📁 فایل‌های دانلود شده:"
+          ls -lh download/
+      
+      - name: 📤 Upload to GitHub
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-video
+          path: download/
+          retention-days: 7
