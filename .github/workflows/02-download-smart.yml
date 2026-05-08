@@ -10,7 +10,7 @@ on:
       quality_mode:
         description: '🎯 حالت کیفیت'
         required: true
-        default: '720p-safe'
+        default: 'hd-safe'
         type: choice
         options:
           - minimal (حداقل کیفیت - کمترین حجم)
@@ -86,26 +86,58 @@ jobs:
           echo "🎯 کیفیت انتخاب شده: $QUALITY_NAME"
           echo "🔧 فرمت: $FORMAT"
       
-      - name: 📊 Check file size before download (for high quality)
-        if: contains(github.event.inputs.quality_mode, '1080') || contains(github.event.inputs.quality_mode, 'ultra')
+      - name: 📊 Get video info (safe mode)
         run: |
-          echo "🔍 در حال بررسی حجم تقریبی ویدیو..."
+          echo "🔍 در حال دریافت اطلاعات ویدیو..."
           
-          # دریافت اطلاعات ویدیو
-          yt-dlp -J "${{ github.event.inputs.url }}" > video_info.json
+          # دریافت اطلاعات ویدیو با مدیریت خطا
+          yt-dlp -j "${{ github.event.inputs.url }}" > video_info.json 2>/dev/null || echo "{}" > video_info.json
           
-          # استخراج حجم تقریبی
+          # استخراج اطلاعات با مقادیر پیش‌فرض در صورت نبودن
+          TITLE=$(jq -r '.title // "Unknown Title"' video_info.json 2>/dev/null)
+          CHANNEL=$(jq -r '.channel // "Unknown Channel"' video_info.json 2>/dev/null)
+          DURATION=$(jq -r '.duration // 0' video_info.json 2>/dev/null)
+          
+          # استخراج حجم تقریبی با مدیریت خطا
           FILESIZE=$(jq -r '.filesize_approx // .filesize // 0' video_info.json 2>/dev/null || echo "0")
-          FILESIZE_GB=$(echo "scale=2; $FILESIZE / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "0")
           
-          echo "📊 حجم تقریبی: ${FILESIZE_GB} GB"
-          echo "FILESIZE_GB=$FILESIZE_GB" >> $GITHUB_ENV
-          
-          if (( $(echo "$FILESIZE_GB > 2" | bc -l) )); then
-            echo "⚠️ هشدار: حجم فایل از 2GB بیشتر است!"
-            echo "گیت‌هاب نمی‌تواند فایل‌های بزرگتر از 2GB را آپلود کند."
-            echo "آیا مطمئن هستید؟ (برای ادامه به confirm_high_quality=yes نیاز است)"
+          # اگر حجم صفر بود، سعی می‌کنیم از فرمت best تخمین بزنیم
+          if [ "$FILESIZE" = "0" ] || [ "$FILESIZE" = "null" ]; then
+            echo "حجم دقیق در دسترس نیست، در حال تخمین..."
+            yt-dlp -f best -j "${{ github.event.inputs.url }}" 2>/dev/null | jq -r '.filesize_approx // .filesize // 0' > approx_size.txt 2>/dev/null || echo "0" > approx_size.txt
+            FILESIZE=$(cat approx_size.txt)
           fi
+          
+          echo "FILE_SIZE_BYTES=$FILESIZE" >> $GITHUB_ENV
+          
+          if [ "$FILESIZE" != "0" ] && [ "$FILESIZE" != "null" ]; then
+            FILESIZE_MB=$(echo "scale=2; $FILESIZE / 1024 / 1024" | bc 2>/dev/null || echo "0")
+            FILESIZE_GB=$(echo "scale=2; $FILESIZE / 1024 / 1024 / 1024" | bc 2>/dev/null || echo "0")
+            echo "FILE_SIZE_MB=$FILESIZE_MB" >> $GITHUB_ENV
+            echo "FILE_SIZE_GB=$FILESIZE_GB" >> $GITHUB_ENV
+            echo "📊 حجم تقریبی: ${FILESIZE_MB} MB / ${FILESIZE_GB} GB"
+          else
+            echo "FILE_SIZE_MB=0" >> $GITHUB_ENV
+            echo "FILE_SIZE_GB=0" >> $GITHUB_ENV
+            echo "⚠️ امکان محاسبه حجم دقیق وجود ندارد"
+          fi
+          
+          echo "📺 عنوان: $TITLE"
+          echo "📡 کانال: $CHANNEL"
+          
+          # ذخیره در environment برای مراحل بعد
+          echo "VIDEO_TITLE=$TITLE" >> $GITHUB_ENV
+          echo "VIDEO_CHANNEL=$CHANNEL" >> $GITHUB_ENV
+      
+      - name: ⚠️ Warning for large files
+        if: env.FILE_SIZE_GB != 0 && env.FILE_SIZE_GB > 2
+        run: |
+          echo "⚠️⚠️⚠️ هشدار مهم ⚠️⚠️⚠️"
+          echo "حجم تقریبی فایل: ${{ env.FILE_SIZE_GB }} GB"
+          echo "محدودیت گیت‌هاب برای آپلود Artifact: 2 GB"
+          echo "این فایل ممکن است قابل آپلود نباشد!"
+          echo ""
+          echo "پیشنهاد: کیفیت پایین‌تری انتخاب کنید"
       
       - name: ⬇️ Download video
         id: download
@@ -114,23 +146,27 @@ jobs:
           
           echo "⬇️ شروع دانلود..."
           echo "🎯 کیفیت: ${{ env.QUALITY_NAME }}"
+          echo "📺 ویدیو: ${{ env.VIDEO_TITLE }}"
+          
+          # ساخت نام فایل امن (بدون کاراکترهای خاص)
+          SAFE_TITLE=$(echo "${{ env.VIDEO_TITLE }}" | sed 's/[^a-zA-Z0-9]/_/g' | cut -c1-50)
           
           if [ "${{ github.event.inputs.quality_mode }}" = "audio-only (فقط صوت MP3)" ]; then
             yt-dlp -f "${{ env.FORMAT }}" \
               -x --audio-format mp3 \
               --audio-quality 0 \
               --progress \
-              -o "download/%(title)s.%(ext)s" \
+              -o "download/${SAFE_TITLE}.%(ext)s" \
               "${{ github.event.inputs.url }}"
           else
             yt-dlp -f "${{ env.FORMAT }}" \
               --merge-output-format mp4 \
               --progress \
-              -o "download/%(title)s.%(ext)s" \
+              -o "download/${SAFE_TITLE}.%(ext)s" \
               "${{ github.event.inputs.url }}"
           fi
           
-          if [ $? -ne 0 ]; then
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
             echo "❌ خطا در دانلود!"
             exit 1
           fi
@@ -139,17 +175,24 @@ jobs:
           
           # نمایش اطلاعات فایل
           cd download
-          FILE_NAME=$(ls | head -1)
-          FILE_SIZE=$(du -h "$FILE_NAME" | cut -f1)
-          FILE_SIZE_MB=$(du -m "$FILE_NAME" | cut -f1)
-          
-          echo "DOWNLOADED_FILE=$FILE_NAME" >> $GITHUB_ENV
-          echo "FILE_SIZE=$FILE_SIZE" >> $GITHUB_ENV
-          echo "FILE_SIZE_MB=$FILE_SIZE_MB" >> $GITHUB_ENV
+          FILE_NAME=$(ls -1 2>/dev/null | head -1)
+          if [ -n "$FILE_NAME" ]; then
+            FILE_SIZE=$(du -h "$FILE_NAME" 2>/dev/null | cut -f1)
+            FILE_SIZE_MB=$(du -m "$FILE_NAME" 2>/dev/null | cut -f1)
+            echo "DOWNLOADED_FILE=$FILE_NAME" >> $GITHUB_ENV
+            echo "FILE_SIZE=$FILE_SIZE" >> $GITHUB_ENV
+            echo "FILE_SIZE_MB=$FILE_SIZE_MB" >> $GITHUB_ENV
+            echo "📁 فایل: $FILE_NAME"
+            echo "💾 حجم: $FILE_SIZE"
+          else
+            echo "❌ خطا: فایلی دانلود نشد!"
+            ls -la
+            exit 1
+          fi
           cd ..
       
       - name: ✂️ Split file if larger than 2GB
-        if: env.FILE_SIZE_MB > 2000
+        if: env.FILE_SIZE_MB != 0 && env.FILE_SIZE_MB > 2000
         run: |
           echo "⚠️ حجم فایل (${{ env.FILE_SIZE }}) از 2GB بیشتر است!"
           echo "در حال تکه‌تکه کردن فایل..."
@@ -157,7 +200,6 @@ jobs:
           cd download
           FILE="${{ env.DOWNLOADED_FILE }}"
           BASENAME="${FILE%.*}"
-          EXT="${FILE##*.}"
           
           # تقسیم به بخش‌های 1.8 گیگابایتی
           split -b 1800M "$FILE" "${BASENAME}_part_"
@@ -179,7 +221,7 @@ copy /b ${BASENAME}_part_* $FILE
 Get-Content ${BASENAME}_part_* -AsByteStream | Set-Content $FILE -AsByteStream
 EOF
           
-          echo "✅ فایل به $(ls ${BASENAME}_part_* | wc -l) بخش تقسیم شد"
+          echo "✅ فایل به $(ls ${BASENAME}_part_* 2>/dev/null | wc -l) بخش تقسیم شد"
           cd ..
       
       - name: 📊 Create download report
@@ -189,9 +231,13 @@ EOF
           echo "| آیتم | مقدار |" >> report.md
           echo "|------|-------|" >> report.md
           echo "| لینک | ${{ github.event.inputs.url }} |" >> report.md
+          echo "| عنوان | ${{ env.VIDEO_TITLE }} |" >> report.md
+          echo "| کانال | ${{ env.VIDEO_CHANNEL }} |" >> report.md
           echo "| کیفیت | ${{ env.QUALITY_NAME }} |" >> report.md
-          echo "| حجم | ${{ env.FILE_SIZE }} |" >> report.md
-          echo "| تعداد فایل‌ها | $(ls download/ | wc -l) |" >> report.md
+          if [ -n "${{ env.FILE_SIZE }}" ]; then
+            echo "| حجم | ${{ env.FILE_SIZE }} |" >> report.md
+          fi
+          echo "| تعداد فایل‌ها | $(ls download/ 2>/dev/null | wc -l) |" >> report.md
           echo "" >> report.md
           
           if [ -f download/README_SPLIT.txt ]; then
@@ -203,15 +249,20 @@ EOF
             echo '```' >> report.md
           fi
           
-          echo "### 📂 لیست فایل‌ها" >> report.md
-          echo '```' >> report.md
-          ls -lh download/ >> report.md
-          echo '```' >> report.md
+          if [ -d download ] && [ "$(ls -A download 2>/dev/null)" ]; then
+            echo "### 📂 لیست فایل‌ها" >> report.md
+            echo '```' >> report.md
+            ls -lh download/ 2>/dev/null >> report.md
+            echo '```' >> report.md
+          else
+            echo "❌ **هیچ فایلی دانلود نشد!**" >> report.md
+          fi
           
           cat report.md >> $GITHUB_STEP_SUMMARY
           
-          # ذخیره گزارش به عنوان فایل
-          cp report.md download/REPORT.md
+          # ذخیره گزارش
+          mkdir -p download
+          cp report.md download/REPORT.md 2>/dev/null || true
       
       - name: 📤 Upload to GitHub
         uses: actions/upload-artifact@v4
@@ -220,8 +271,13 @@ EOF
           path: download/
           retention-days: 7
           compression-level: 0
+          if-no-files-found: warn
       
       - name: 🎉 Complete
         run: |
-          echo "✅ دانلود با موفقیت انجام شد!"
-          echo "📁 فایل را از بخش Artifacts دانلود کنید"
+          if [ -d download ] && [ "$(ls -A download 2>/dev/null)" ]; then
+            echo "✅ دانلود با موفقیت انجام شد!"
+            echo "📁 فایل را از بخش Artifacts دانلود کنید"
+          else
+            echo "❌ دانلود انجام نشد. لطفاً لاگ‌ها را بررسی کنید."
+          fi
