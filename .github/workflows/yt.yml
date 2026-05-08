@@ -1,38 +1,35 @@
-name: 📥 YouTube Downloader - Three Methods
+name: 📥 YouTube Downloader
 
 on:
-  workflow_dispatch:  # فقط دستی اجرا بشه
+  workflow_dispatch:
     inputs:
       url:
-        description: '🔗 YouTube URL (لینک ویدیو)'
+        description: '🔗 لینک یوتیوب'
         required: true
         type: string
-      method:
-        description: '📦 روش دانلود'
-        required: true
-        default: 'yt-dlp'
-        type: choice
-        options:
-          - yt-dlp
-          - pytube
-          - both
       quality:
         description: '🎯 کیفیت'
         required: true
-        default: 'best'
+        default: '1080p'
         type: choice
         options:
-          - best
-          - 1080
-          - 720
-          - audio
+          - best (بالاترین کیفیت)
+          - 2160p (4K)
+          - 1440p (2K)
+          - 1080p
+          - 720p
+          - 480p
+          - 360p
+          - 240p
+          - 144p (حداقل کیفیت)
+          - audio-only (فقط صوت)
 
 jobs:
   download:
     runs-on: ubuntu-latest
     
     steps:
-      - name: 📥 Checkout repository
+      - name: 📥 Checkout
         uses: actions/checkout@v4
       
       - name: 🐍 Setup Python
@@ -40,35 +37,72 @@ jobs:
         with:
           python-version: '3.11'
       
-      - name: 📦 Install dependencies
+      - name: 📦 Install yt-dlp & ffmpeg
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          # برای yt-dlp نیاز به ffmpeg داریم
+          pip install yt-dlp
           sudo apt-get update
           sudo apt-get install -y ffmpeg
+          yt-dlp --version
       
-      - name: 🎬 Download with yt-dlp
-        if: ${{ github.event.inputs.method == 'yt-dlp' || github.event.inputs.method == 'both' }}
+      - name: 🎬 Download with Selected Quality
         run: |
-          python downloaders/yt_dlp_downloader.py << EOF
-          ${{ github.event.inputs.url }}
-          ${{ github.event.inputs.quality == 'best' && '1' || github.event.inputs.quality == '1080' && '2' || github.event.inputs.quality == '720' && '3' || '4' }}
-          EOF
+          mkdir -p download
+          
+          case "${{ github.event.inputs.quality }}" in
+            "best (بالاترین کیفیت)")
+              FORMAT="bestvideo+bestaudio/best"
+              ;;
+            "2160p (4K)")
+              FORMAT="bestvideo[height<=2160]+bestaudio/best"
+              ;;
+            "1440p (2K)")
+              FORMAT="bestvideo[height<=1440]+bestaudio/best"
+              ;;
+            "1080p")
+              FORMAT="bestvideo[height<=1080]+bestaudio/best"
+              ;;
+            "720p")
+              FORMAT="bestvideo[height<=720]+bestaudio/best"
+              ;;
+            "480p")
+              FORMAT="bestvideo[height<=480]+bestaudio/best"
+              ;;
+            "360p")
+              FORMAT="bestvideo[height<=360]+bestaudio/best"
+              ;;
+            "240p")
+              FORMAT="bestvideo[height<=240]+bestaudio/best"
+              ;;
+            "144p (حداقل کیفیت)")
+              FORMAT="worstvideo+worstaudio/worst"
+              ;;
+            "audio-only (فقط صوت)")
+              FORMAT="bestaudio/best"
+              ;;
+            *)
+              FORMAT="bestvideo+bestaudio/best"
+              ;;
+          esac
+          
+          echo "🎯 کیفیت: ${{ github.event.inputs.quality }}"
+          echo "🔧 فرمت: $FORMAT"
+          
+          if [ "${{ github.event.inputs.quality }}" = "audio-only (فقط صوت)" ]; then
+            yt-dlp -f "$FORMAT" -x --audio-format mp3 \
+              -o "download/%(title)s.%(ext)s" \
+              "${{ github.event.inputs.url }}"
+          else
+            yt-dlp -f "$FORMAT" --merge-output-format mp4 \
+              -o "download/%(title)s.%(ext)s" \
+              "${{ github.event.inputs.url }}"
+          fi
+          
+          echo "✅ دانلود کامل شد!"
+          ls -lh download/
       
-      - name: 🐍 Download with pytube
-        if: ${{ github.event.inputs.method == 'pytube' || github.event.inputs.method == 'both' }}
-        run: |
-          python downloaders/pytube_downloader.py << EOF
-          ${{ github.event.inputs.url }}
-          ${{ github.event.inputs.quality == 'best' && '1' || github.event.inputs.quality == 'audio' && '3' || '2' }}
-          EOF
-      
-      - name: 📤 Upload downloaded files
+      - name: 📤 Upload to GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: downloaded-videos-${{ github.run_id }}
-          path: |
-            downloads_*/
-            *.mp4
-            *.mp3
+          name: youtube-download
+          path: download/
+          retention-days: 7
